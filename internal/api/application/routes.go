@@ -6,6 +6,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"github.com/jadenj13/wallet-backend/internal/api/client"
 	"github.com/jadenj13/wallet-backend/internal/api/handler"
 )
 
@@ -24,8 +25,15 @@ func (a *App) loadRoutes() {
 }
 
 func (a *App) loadWalletRoutes(router chi.Router) {
-	walletHandler := &handler.Wallet{}
+	parties := make([]*client.PartyClient, len(a.config.PartyURLs))
+	for i, url := range a.config.PartyURLs {
+		parties[i] = client.NewPartyClient(url)
+	}
+
+	walletHandler := handler.NewWallet(parties)
 
 	router.Post("/", walletHandler.Init)
 	router.Post("/sign", walletHandler.Sign)
+	router.Get("/pubkey", walletHandler.GetPubKey)
+	router.Get("/address", walletHandler.GetAddress)
 }

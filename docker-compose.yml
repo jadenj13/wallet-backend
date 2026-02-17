@@ -12,6 +12,23 @@ services:
       - "3000:3000"
     environment:
       REDIS_ADDR: redis:6379
+      PARTY_URLS: '["http://party-0:3000","http://party-1:3000","http://party-2:3000"]'
+    depends_on:
+      - redis
+      - party-0
+      - party-1
+      - party-2
+
+  party-0:
+    build:
+      context: .
+      dockerfile: cmd/tss/Dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      PARTY_ID: "0"
+      PEERS: '["http://party-1:3000","http://party-2:3000"]'
+      REDIS_ADDR: redis:6379
     depends_on:
       - redis
 
@@ -20,27 +37,23 @@ services:
       context: .
       dockerfile: cmd/tss/Dockerfile
     ports:
-      - "3001:3000"
+      - "3002:3000"
     environment:
       PARTY_ID: "1"
-      PEERS: '["http://party-2:3000","http://party-3:3000"]'
+      PEERS: '["http://party-0:3000","http://party-2:3000"]'
+      REDIS_ADDR: redis:6379
+    depends_on:
+      - redis
 
   party-2:
     build:
       context: .
       dockerfile: cmd/tss/Dockerfile
     ports:
-      - "3002:3000"
-    environment:
-      PARTY_ID: "2"
-      PEERS: '["http://party-1:3000","http://party-3:3000"]'
-
-  party-3:
-    build:
-      context: .
-      dockerfile: cmd/tss/Dockerfile
-    ports:
       - "3003:3000"
     environment:
-      PARTY_ID: "3"
-      PEERS: '["http://party-1:3000","http://party-2:3000"]'
+      PARTY_ID: "2"
+      PEERS: '["http://party-0:3000","http://party-1:3000"]'
+      REDIS_ADDR: redis:6379
+    depends_on:
+      - redis
