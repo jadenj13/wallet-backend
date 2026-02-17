@@ -1,0 +1,46 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: cmd/api/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      REDIS_ADDR: redis:6379
+    depends_on:
+      - redis
+
+  party-1:
+    build:
+      context: .
+      dockerfile: cmd/tss/Dockerfile
+    ports:
+      - "3001:3000"
+    environment:
+      PARTY_ID: "1"
+      PEERS: '["http://party-2:3000","http://party-3:3000"]'
+
+  party-2:
+    build:
+      context: .
+      dockerfile: cmd/tss/Dockerfile
+    ports:
+      - "3002:3000"
+    environment:
+      PARTY_ID: "2"
+      PEERS: '["http://party-1:3000","http://party-3:3000"]'
+
+  party-3:
+    build:
+      context: .
+      dockerfile: cmd/tss/Dockerfile
+    ports:
+      - "3003:3000"
+    environment:
+      PARTY_ID: "3"
+      PEERS: '["http://party-1:3000","http://party-2:3000"]'
