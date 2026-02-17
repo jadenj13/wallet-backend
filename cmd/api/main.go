@@ -1,4 +1,4 @@
-package api
+package main
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/jadenj13/wallet-backend/application"
+	"github.com/jadenj13/wallet-backend/internal/api/application"
 )
 
 func main() {
