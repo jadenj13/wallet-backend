@@ -18,8 +18,8 @@ import (
 )
 
 type PartyStore interface {
-	SaveKeyData(ctx context.Context, partyID int, data *keygen.LocalPartySaveData) error
-	LoadKeyData(ctx context.Context, partyID int) (*keygen.LocalPartySaveData, error)
+	SaveKeyData(ctx context.Context, partyID int, userID string, data *keygen.LocalPartySaveData) error
+	LoadKeyData(ctx context.Context, partyID int, userID string) (*keygen.LocalPartySaveData, error)
 }
 
 type Party struct {
@@ -27,11 +27,12 @@ type Party struct {
 	Peers     []string
 	threshold int
 	parties   int
-	keyData   *keygen.LocalPartySaveData
+	keyData   map[string]*keygen.LocalPartySaveData // keyed by userID
 	store     PartyStore
 	activeParty    tsslib.Party
 	activePartyIDs []*tsslib.PartyID
 	keygenStarted  bool
+	activeUserID   string
 	mu             sync.RWMutex
 }
 
@@ -48,28 +49,29 @@ func NewParty(id int, peers []string, threshold, parties int, store PartyStore) 
 		Peers:     peers,
 		threshold: threshold,
 		parties:   parties,
+		keyData:   make(map[string]*keygen.LocalPartySaveData),
 		store:     store,
 	}
 }
 
-func (p *Party) loadKeyData(ctx context.Context) {
+func (p *Party) loadKeyData(ctx context.Context, userID string) {
 	p.mu.RLock()
-	if p.keyData != nil {
+	if p.keyData[userID] != nil {
 		p.mu.RUnlock()
 		return
 	}
 	p.mu.RUnlock()
 
-	keyData, err := p.store.LoadKeyData(ctx, p.ID)
+	keyData, err := p.store.LoadKeyData(ctx, p.ID, userID)
 	if err != nil {
 		log.Printf("Party %d: Failed to load key data from store: %v", p.ID, err)
 		return
 	}
 	if keyData != nil {
 		p.mu.Lock()
-		if p.keyData == nil { // re-check under write lock
-			p.keyData = keyData
-			log.Printf("Party %d: Loaded key data from store", p.ID)
+		if p.keyData[userID] == nil { // re-check under write lock
+			p.keyData[userID] = keyData
+			log.Printf("Party %d: Loaded key data from store for user %s", p.ID, userID)
 		}
 		p.mu.Unlock()
 	}
@@ -126,7 +128,7 @@ func (p *Party) broadcastMessage(msg tsslib.Message) {
 	}
 }
 
-func (p *Party) runKeygen() {
+func (p *Party) runKeygen(userID string) {
 	unsorted := make(tsslib.UnSortedPartyIDs, p.parties)
 	for i := 0; i < p.parties; i++ {
 		unsorted[i] = tsslib.NewPartyID(fmt.Sprintf("%d", i), "", big.NewInt(int64(i+1)))
@@ -158,7 +160,8 @@ func (p *Party) runKeygen() {
 		p.mu.Lock()
 		p.activeParty = nil
 		p.activePartyIDs = nil
-		p.keygenStarted = false // allow retry if keygen failed without producing key data
+		p.keygenStarted = false
+		p.activeUserID = ""
 		p.mu.Unlock()
 	}()
 
@@ -174,14 +177,13 @@ func (p *Party) runKeygen() {
 		case msg := <-outCh:
 			p.broadcastMessage(msg)
 		case save := <-endCh:
-			p.mu.Lock()
-			p.keyData = save
-			p.mu.Unlock()
-
-			if err := p.store.SaveKeyData(context.Background(), p.ID, save); err != nil {
+			if err := p.store.SaveKeyData(context.Background(), p.ID, userID, save); err != nil {
 				log.Printf("Party %d: Failed to save key data: %v", p.ID, err)
 			} else {
-				log.Printf("Party %d: Key data saved to store", p.ID)
+				p.mu.Lock()
+				p.keyData[userID] = save
+				p.mu.Unlock()
+				log.Printf("Party %d: Key data saved to store for user %s", p.ID, userID)
 			}
 
 			log.Printf("Party %d: Keygen completed successfully", p.ID)
@@ -194,41 +196,60 @@ func (p *Party) runKeygen() {
 }
 
 func (p *Party) InitKeygen(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	p.mu.Lock()
-	if p.keygenStarted || p.keyData != nil {
+	if p.keygenStarted {
 		p.mu.Unlock()
-		http.Error(w, "Keygen already started or completed", http.StatusConflict)
+		http.Error(w, "keygen already in progress", http.StatusConflict)
+		return
+	}
+	if p.keyData[req.UserID] != nil {
+		p.mu.Unlock()
+		http.Error(w, "keygen already completed for this user", http.StatusConflict)
 		return
 	}
 	p.keygenStarted = true
+	p.activeUserID = req.UserID
 	p.mu.Unlock()
 
-	go p.runKeygen()
+	go p.runKeygen(req.UserID)
 	json.NewEncoder(w).Encode(map[string]string{"status": "keygen_started"})
 }
 
 func (p *Party) HandleSign(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Message string `json:"message"`
+		UserID  string `json:"user_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if req.UserID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
 
 	p.mu.RLock()
-	keyData := p.keyData
+	keyData := p.keyData[req.UserID]
 	p.mu.RUnlock()
 
 	if keyData == nil {
-		p.loadKeyData(r.Context())
+		p.loadKeyData(r.Context(), req.UserID)
 		p.mu.RLock()
-		keyData = p.keyData
+		keyData = p.keyData[req.UserID]
 		p.mu.RUnlock()
 	}
 
 	if keyData == nil {
-		http.Error(w, "No key data available", http.StatusBadRequest)
+		http.Error(w, "no key data available for this user", http.StatusBadRequest)
 		return
 	}
 
@@ -357,19 +378,25 @@ func (p *Party) HandleMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *Party) HandleGetPubKey(w http.ResponseWriter, r *http.Request) {
+	userID := r.URL.Query().Get("user_id")
+	if userID == "" {
+		http.Error(w, "user_id is required", http.StatusBadRequest)
+		return
+	}
+
 	p.mu.RLock()
-	keyData := p.keyData
+	keyData := p.keyData[userID]
 	p.mu.RUnlock()
 
 	if keyData == nil {
-		p.loadKeyData(r.Context())
+		p.loadKeyData(r.Context(), userID)
 		p.mu.RLock()
-		keyData = p.keyData
+		keyData = p.keyData[userID]
 		p.mu.RUnlock()
 	}
 
 	if keyData == nil {
-		http.Error(w, "No key data available", http.StatusNotFound)
+		http.Error(w, "no key data available for this user", http.StatusNotFound)
 		return
 	}
 

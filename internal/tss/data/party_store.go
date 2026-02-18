@@ -18,16 +18,16 @@ func NewRedisPartyStore(rdb *redis.Client) *RedisPartyStore {
 	return &RedisPartyStore{rdb: rdb}
 }
 
-func (s *RedisPartyStore) SaveKeyData(ctx context.Context, partyID int, data *keygen.LocalPartySaveData) error {
+func (s *RedisPartyStore) SaveKeyData(ctx context.Context, partyID int, userID string, data *keygen.LocalPartySaveData) error {
 	b, err := json.Marshal(data)
 	if err != nil {
 		return fmt.Errorf("marshal key data: %w", err)
 	}
-	return s.rdb.Set(ctx, keyDataKey(partyID), b, 0).Err()
+	return s.rdb.Set(ctx, keyDataKey(partyID, userID), b, 0).Err()
 }
 
-func (s *RedisPartyStore) LoadKeyData(ctx context.Context, partyID int) (*keygen.LocalPartySaveData, error) {
-	b, err := s.rdb.Get(ctx, keyDataKey(partyID)).Bytes()
+func (s *RedisPartyStore) LoadKeyData(ctx context.Context, partyID int, userID string) (*keygen.LocalPartySaveData, error) {
+	b, err := s.rdb.Get(ctx, keyDataKey(partyID, userID)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, nil
 	}
@@ -47,6 +47,6 @@ func (s *RedisPartyStore) LoadKeyData(ctx context.Context, partyID int) (*keygen
 	return &data, nil
 }
 
-func keyDataKey(partyID int) string {
-	return fmt.Sprintf("tss:party:%d:keydata", partyID)
+func keyDataKey(partyID int, userID string) string {
+	return fmt.Sprintf("tss:party:%d:user:%s:keydata", partyID, userID)
 }

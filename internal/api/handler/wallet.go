@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/jadenj13/wallet-backend/internal/api/address"
@@ -43,14 +44,28 @@ func (w *Wallet) fanOut(_ context.Context, fn func(*client.PartyClient) error) e
 	return nil
 }
 
+func userIDFromContext(r *http.Request) (string, bool) {
+	claims := GetAuthClaims(r.Context())
+	if claims == nil {
+		return "", false
+	}
+	return strconv.FormatUint(uint64(claims.UserID), 10), true
+}
+
 func (w *Wallet) Init(rw http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if len(w.parties) == 0 {
 		http.Error(rw, "no party nodes configured", http.StatusServiceUnavailable)
 		return
 	}
 
 	if err := w.fanOut(r.Context(), func(p *client.PartyClient) error {
-		return p.InitKeygen(r.Context())
+		return p.InitKeygen(r.Context(), userID)
 	}); err != nil {
 		http.Error(rw, err.Error(), http.StatusBadGateway)
 		return
@@ -61,6 +76,12 @@ func (w *Wallet) Init(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Wallet) Sign(rw http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		Message string `json:"message"`
 	}
@@ -86,7 +107,7 @@ func (w *Wallet) Sign(rw http.ResponseWriter, r *http.Request) {
 	ch := make(chan result, len(w.parties))
 	for _, p := range w.parties {
 		go func(party *client.PartyClient) {
-			sig, err := party.Sign(r.Context(), req.Message)
+			sig, err := party.Sign(r.Context(), req.Message, userID)
 			ch <- result{sig, err}
 		}(p)
 	}
@@ -112,6 +133,12 @@ func (w *Wallet) Sign(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Wallet) GetAddress(rw http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if len(w.parties) == 0 {
 		http.Error(rw, "no party nodes configured", http.StatusServiceUnavailable)
 		return
@@ -119,7 +146,7 @@ func (w *Wallet) GetAddress(rw http.ResponseWriter, r *http.Request) {
 
 	var pubKey *client.PubKey
 	for _, p := range w.parties {
-		pk, err := p.GetPubKey(r.Context())
+		pk, err := p.GetPubKey(r.Context(), userID)
 		if err != nil {
 			continue
 		}
@@ -159,13 +186,19 @@ func (w *Wallet) GetAddress(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Wallet) GetPubKey(rw http.ResponseWriter, r *http.Request) {
+	userID, ok := userIDFromContext(r)
+	if !ok {
+		http.Error(rw, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	if len(w.parties) == 0 {
 		http.Error(rw, "no party nodes configured", http.StatusServiceUnavailable)
 		return
 	}
 
 	for _, p := range w.parties {
-		pubKey, err := p.GetPubKey(r.Context())
+		pubKey, err := p.GetPubKey(r.Context(), userID)
 		if err != nil {
 			continue
 		}

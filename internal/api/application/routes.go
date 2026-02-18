@@ -20,13 +20,6 @@ func (a *App) loadRoutes() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	router.Route("/auth", a.loadAuthRoutes)
-	router.Route("/wallet", a.loadWalletRoutes)
-
-	a.router = router
-}
-
-func (a *App) loadAuthRoutes(router chi.Router) {
 	authService := handler.NewAuthService(
 		[]byte(a.config.JWTSecret),
 		[]byte(a.config.DeviceSecret),
@@ -36,11 +29,20 @@ func (a *App) loadAuthRoutes(router chi.Router) {
 		data.NewTOTPStore(a.db),
 	)
 
+	router.Route("/auth", func(r chi.Router) { a.loadAuthRoutes(r, authService) })
+	router.Route("/wallet", func(r chi.Router) { a.loadWalletRoutes(r, authService) })
+
+	a.router = router
+}
+
+func (a *App) loadAuthRoutes(router chi.Router, authService *handler.AuthService) {
 	router.Post("/register", authService.HandleRegister)
 	router.Post("/login", authService.HandleLogin)
 }
 
-func (a *App) loadWalletRoutes(router chi.Router) {
+func (a *App) loadWalletRoutes(router chi.Router, authService *handler.AuthService) {
+	router.Use(authService.AuthMiddleware(handler.AuthLevelPassword))
+
 	parties := make([]*client.PartyClient, len(a.config.PartyURLs))
 	for i, url := range a.config.PartyURLs {
 		parties[i] = client.NewPartyClient(url)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -32,11 +33,17 @@ func NewPartyClient(baseURL string) *PartyClient {
 	}
 }
 
-func (c *PartyClient) InitKeygen(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/keygen", nil)
+func (c *PartyClient) InitKeygen(ctx context.Context, userID string) error {
+	body, err := json.Marshal(map[string]string{"user_id": userID})
+	if err != nil {
+		return fmt.Errorf("marshal keygen request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/keygen", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build keygen request: %w", err)
 	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.http.Do(req)
 	if err != nil {
@@ -50,8 +57,8 @@ func (c *PartyClient) InitKeygen(ctx context.Context) error {
 	return nil
 }
 
-func (c *PartyClient) Sign(ctx context.Context, message string) (*SignatureData, error) {
-	body, err := json.Marshal(map[string]string{"message": message})
+func (c *PartyClient) Sign(ctx context.Context, message, userID string) (*SignatureData, error) {
+	body, err := json.Marshal(map[string]string{"message": message, "user_id": userID})
 	if err != nil {
 		return nil, fmt.Errorf("marshal sign request: %w", err)
 	}
@@ -80,8 +87,9 @@ func (c *PartyClient) Sign(ctx context.Context, message string) (*SignatureData,
 	return &sig, nil
 }
 
-func (c *PartyClient) GetPubKey(ctx context.Context) (*PubKey, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/pubkey", nil)
+func (c *PartyClient) GetPubKey(ctx context.Context, userID string) (*PubKey, error) {
+	params := url.Values{"user_id": {userID}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/pubkey?"+params.Encode(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("build pubkey request: %w", err)
 	}
