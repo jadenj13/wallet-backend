@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/jadenj13/wallet-backend/internal/api/client"
+	"github.com/jadenj13/wallet-backend/internal/api/data"
 	"github.com/jadenj13/wallet-backend/internal/api/handler"
 )
 
@@ -19,9 +20,24 @@ func (a *App) loadRoutes() {
 		w.WriteHeader(http.StatusOK)
 	})
 
+	router.Route("/auth", a.loadAuthRoutes)
 	router.Route("/wallet", a.loadWalletRoutes)
 
 	a.router = router
+}
+
+func (a *App) loadAuthRoutes(router chi.Router) {
+	authService := handler.NewAuthService(
+		[]byte(a.config.JWTSecret),
+		[]byte(a.config.DeviceSecret),
+		data.NewSessionStore(a.db),
+		data.NewDeviceStore(a.db),
+		data.NewUserStore(a.db),
+		data.NewTOTPStore(a.db),
+	)
+
+	router.Post("/register", authService.HandleRegister)
+	router.Post("/login", authService.HandleLogin)
 }
 
 func (a *App) loadWalletRoutes(router chi.Router) {

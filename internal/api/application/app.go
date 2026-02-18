@@ -6,53 +6,50 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+
+	"github.com/jadenj13/wallet-backend/internal/api/data"
 )
 
 type App struct {
 	router http.Handler
-	rdb    *redis.Client
 	config Config
+	db     *gorm.DB
 }
 
-func New(config Config) *App {
+func New(config Config) (*App, error) {
+	db, err := data.Open(config.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+
 	app := &App{
-		rdb:    redis.NewClient(&redis.Options{Addr: config.RedisAddress}),
 		config: config,
+		db:     db,
 	}
 
 	app.loadRoutes()
 
-	return app
+	return app, nil
 }
 
 func (a *App) Start(ctx context.Context) error {
+	sqlDB, err := a.db.DB()
+	if err == nil {
+		defer sqlDB.Close()
+	}
+
 	server := &http.Server{
 		Addr:    fmt.Sprintf(":%d", a.config.ServerPort),
 		Handler: a.router,
 	}
 
-	err := a.rdb.Ping(ctx).Err()
-	if err != nil {
-		return fmt.Errorf("Failed to connect to redis: %w", err)
-	}
-
-	defer func() {
-		if err := a.rdb.Close(); err != nil {
-			fmt.Println("Failed to close redis connection: ", err)
-		}
-	}()
-
-	fmt.Println("Connected to redis")
-
 	ch := make(chan error, 1)
 
 	go func() {
-		err = server.ListenAndServe()
-		if err != nil {
+		if err := server.ListenAndServe(); err != nil {
 			ch <- fmt.Errorf("Failed to start server : %w", err)
 		}
-
 		close(ch)
 	}()
 

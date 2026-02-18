@@ -10,13 +10,16 @@ import (
 )
 
 func main() {
-	app := application.New(application.LoadConfig())
+	app, err := application.New(application.LoadConfig())
+	if err != nil {
+		fmt.Println("Failed to initialize api:", err)
+		os.Exit(1)
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
-	err := app.Start(ctx)
-	if err != nil {
+	if err := app.Start(ctx); err != nil {
 		fmt.Println("Failed to start api:", err)
 	}
 }

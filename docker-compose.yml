@@ -11,10 +11,13 @@ services:
     ports:
       - "3000:3000"
     environment:
-      REDIS_ADDR: redis:6379
       PARTY_URLS: '["http://party-0:3000","http://party-1:3000","http://party-2:3000"]'
+      DB_PATH: /data/wallet.db
+      JWT_SECRET: change-me-in-production
+      DEVICE_SECRET: change-me-in-production
+    volumes:
+      - api-data:/data
     depends_on:
-      - redis
       - party-0
       - party-1
       - party-2
@@ -57,3 +60,6 @@ services:
       REDIS_ADDR: redis:6379
     depends_on:
       - redis
+
+volumes:
+  api-data:
