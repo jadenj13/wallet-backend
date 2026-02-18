@@ -232,7 +232,7 @@ func (a *AuthService) Login(req LoginRequest, ip string) (*LoginResponse, error)
 		device.LastSeenAt = time.Now()
 		a.deviceStore.Update(device)
 		
-		if device.IsTrusted {
+		if device.IsTrusted && authLevel < AuthLevelDevice {
 			authLevel = AuthLevelDevice
 		}
 	}
